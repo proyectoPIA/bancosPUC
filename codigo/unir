@@ -1,0 +1,822 @@
+# Funcion para extraer de los archivos las cuentas que sean escogidas
+
+import pandas as pd
+import numpy as np
+import os
+import re
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import datetime as dt
+from unidecode import unidecode
+
+
+# se define la funcion con el directorio relevante
+basePath = "/Volumes/GoogleDrive/Mi unidad/proyectosPragma/bancosPUC/"
+#expand directory
+
+def exFile(x = ""):
+    resultado = basePath + "datos/exceles/" + x
+    return resultado
+
+def exInput(x):
+    resultado = basePath + "input/" + x
+    return resultado
+
+def exOutput(x):
+    resultado = basePath + "output/" + x
+    return resultado
+
+# se deben listar los archivos en el orden correcto (de más viejo a más nuevo)
+
+# se supone que no hay activos diferentes a los exceles en el directorio, sino
+# esto va a fallar
+
+# los archivos quedan en orden, por lo tanto se puede hacer esto para extraer
+# del más viejo al más nuevo 
+
+archivos = os.listdir(exFile())
+
+archivos = archivos[len(archivos):0:-1]
+
+# se extraen los meses
+
+
+meses = [re.sub("[a-z]|\.|0001", "", i) for i in archivos] 
+
+def procesarInformacion(x):
+     
+    principal = pd.read_excel(exFile(x))
+
+    # esto es un machetazo practico, determinar la primera fila.
+
+
+    # se define la columna inicial
+    
+    colInicial = list(
+        map(
+            lambda x : any(("BANCO" in str(z) for z in principal.iloc[x,:])), 
+            range(10) 
+            )
+            ).index(True)
+
+
+    principal = principal.iloc[colInicial:,:]
+
+    
+    # se realiza la preparacion de los datos
+
+    # se encuentra la fila de total.
+
+    filas = ["TOTAL" in str(i) for i in principal.iloc[0,:]]
+
+    if any(filas):
+        total = filas.index(True)
+        principal = principal.iloc[:,0:total]
+
+
+
+    # cuentas
+
+    columnaCuentas = [i for i in principal.iloc[:,0]]
+
+    # se queta la primera entrada (corresponde a nombres)
+
+    columnaCuentas = columnaCuentas[1:]  
+
+    # se dejan solos los bancos
+
+    principal = principal.iloc[:, 2:]
+
+
+    # se revisa si existe algún NA en las filas, en caso que si
+    # se elimina.
+
+
+    filasNoNA = [i for i,z in zip(range(len(principal.iloc[0,:])) ,[not i for i in pd.isna(principal.iloc[0,:])]) if z]
+
+    principal = principal.iloc[:,filasNoNA]
+
+
+    # se sacan los nombres de las filas
+
+    filas = [i for i in principal.iloc[0,:]]
+
+    # se extraen solo los numeros de los bancos
+
+    filas = [re.findall(r'\d+', i)[0] for i in filas]
+
+    # se eliminan los nombres
+
+    principal = principal.iloc[1:,]
+
+    principal = np.array(principal, dtype = np.float64)
+
+    return (filas, columnaCuentas, principal)
+
+
+
+# esta funcion se utiliza para extraer una lista de cuentas de un principal
+
+def extraerCuentas(columnaCuentas, principal, cuentas):
+
+    resultado = np.zeros((len(cuentas), principal.shape[1]), dtype = np.float64 )
+
+    # se itera sobre las cuentas para llegar al resultado
+
+    for i, counter in zip(cuentas, range(len(cuentas))):
+        if i in columnaCuentas:
+
+            ubicacion = columnaCuentas.index(i)
+
+            # se reemplaza la columna con la columna adecuada
+
+            resultado[counter,:] = principal[ubicacion, :]
+
+    return resultado
+
+
+# se requiere una función para juntar dos resultados de la función de extraer
+# cuentas, se supone que ambas funciones extrayeron las mismas cuentas.
+
+# se da prioridad al orden de x
+
+def unir(x, y, ordenX, ordenY):
+
+    # los órdenes son de los bancos
+
+
+    # se re organiza el orden de y para que corresponda al orden de X
+    # en caso que haga falta alguno se crea de una vez una columna de ceros
+
+    # se calcula el número total de bancos
+
+    nBancos = ordenX + ordenY
+
+    nBancos = len(np.unique(np.array(nBancos)))
+
+    resultadoFinal = np.zeros(
+        (x.shape[0], nBancos),
+        dtype = np.float64 
+    )
+
+    for i, counter in zip(ordenX, range(len(ordenX))):
+        
+        try:
+            # esta en la lista
+
+            ubicacion = ordenY.index(i)
+
+            resultadoFinal[:,counter] = y[:,ubicacion]
+
+        except ValueError:
+
+            # no esta en la lista por lo tanto se tiene que poner una columna
+            # de ceros la cual ya está puesta en el resultado
+
+            pass
+
+
+    
+    # en este punto se tiene que iterar sobre los bancos que están en y que 
+    # no estan en x
+
+    rigthOnly = [i for i in ordenY if i not in ordenX]
+
+    # almenos una de las columnas que está en y no esta en x, este caso es más 
+    # complicado porque toca corregir toda la historia.
+
+    if len(rigthOnly) >= 1:
+        # se deben agregar tantas columnas como sean necesarias
+
+        # se actualizan los datos del resultado 
+
+        for i, counter in zip(rigthOnly, range(len(rigthOnly))):
+
+            ubicacion = ordenY.index(i) 
+
+            resultadoFinal[:, counter + len(ordenX)] = y[:,ubicacion]
+
+        
+        # se devuelve el orden correcto
+
+        ordenX = ordenX + rigthOnly
+
+        # se crea un array tri dimensional de zeros para que el array completo 
+        # sea conformable retroactivamente.
+
+        arrAux = np.zeros(
+            (resultadoFinal.shape[0], len(rigthOnly), x.shape[2]),
+            dtype = "f"
+        )
+
+
+        # en este punto se realiza la concatenación de los arreglos
+
+        x = np.concatenate((x, arrAux), axis = 1)
+
+    
+    # se agrega la última capa al resultado 
+
+    # se pone el orden correcto de dimensiones
+
+    resultadoFinal.shape = (*resultadoFinal.shape, 1)
+
+    x = np.concatenate((x,resultadoFinal), axis = 2)
+
+    # se retorna el arreglo y el orden de los bancos.
+
+    return (x, ordenX)
+
+
+# se realiza una funcion para extraer cuentas de todos los archivos
+
+def procesarArchivos(archivos, cuentas):
+
+    # se supone que los archivos tienen que estar en orden cronológico
+
+    filasIni, columnaCuentasIni, principalIni = procesarInformacion(archivos[0])
+
+    inicial = extraerCuentas(
+        columnaCuentasIni,
+        principalIni,
+        cuentas
+    )
+
+    # se convierte en tri dimensional
+
+    inicial.shape = (*inicial.shape, 1)
+
+    ordenInicial = filasIni
+
+
+    # se aplica la conversión a todos los archivos
+
+    for i in archivos[1:]:
+        print(i)
+
+        filasAct, columnaCuentasAct, principalAct = procesarInformacion(i) 
+
+        # se extraen las cuentas relevantes
+
+        principalAct = extraerCuentas(
+            columnaCuentasAct,
+            principalAct,
+            cuentas
+        )
+
+        # se realiza la unión de ambas cosas
+        
+        inicial, ordenInicial = unir( 
+            inicial, 
+            principalAct, 
+            ordenInicial, 
+            filasAct
+            )
+
+    
+    # se retorna el resultado junto con el orden (de los bancos)
+
+    
+
+    return inicial, ordenInicial
+    
+
+
+
+
+def procesarFlujos(datos, cuentas):
+    # los flujos están de forma acumulada por lo tanto en esta función
+    # se restan para que queden de manera mensualizada.
+
+
+    # se crea una lista de listas con cada uno de los conjuntos de meses
+
+
+    anos = []
+
+    for i in range(datos.shape[2]):
+        if (i + 1)%12 == 0:
+
+            anos.append([z for z in range(i - 11, i + 1)])
+
+        elif i == (datos.shape[2] - 1): 
+
+            # este es el último, por lo tanto no se llega a un año completo
+
+            anos.append([z for z in range(i - i%12, i + 1)])
+
+
+    
+    # se crea una funcion para una cuenta y un "año" para realizar
+    # el procesamiento. La cuenta se pone en función del index (no del
+    # nombre)
+
+
+    def funcionAux(cuenta, ano):
+
+        # cuanto se tiene que restar en esta iteración
+
+        actual = datos[cuenta, :, ano[0]].copy()
+
+        for i in ano[1:]:
+
+            original =  datos[cuenta, :, i].copy()
+
+            datos[cuenta, :, i] =  original - actual
+
+            actual = original 
+
+    
+    # cuentas que son flujos
+    # pendientes
+
+    flujos = [i for i,z in zip(range(len(cuentas)), cuentas) if z >= 300000]
+
+
+    for f in flujos:
+        for a in anos:
+            funcionAux(f, a)
+
+
+    return(datos)
+ 
+
+# se carga el diccionario de nombres de bancos
+
+nombres = pd.read_excel(exInput("diccionario.xlsx"))
+
+
+# cuentas para extraer:
+
+cuentasExtraer = [
+    511530, 
+    512000, 
+    513300, 
+    513325, 
+    514505, 
+    514510, 
+    515037, 
+    515035, 
+    515030, 
+    517005, 
+    518020, 
+    519030, 
+    100000, 
+    411510, 
+    411514, 
+    411518, 
+    411548, 
+    411556, 
+    411558,
+    510000,
+    512000,
+    410000,
+    410200,
+    410202,
+    410204,
+    410206,
+    410210,
+    410212,
+    410214,
+    180100,
+    180124,
+    411510,
+    411514,
+    411556,
+    411558,
+    411500,
+    517000,
+    512900,
+    510600
+    ]
+
+datos, bancos = procesarArchivos(archivos, cuentasExtraer)
+
+datos = procesarFlujos(datos, cuentasExtraer)
+
+
+
+# en este punto se realizan funciones para sumar cosas
+
+
+def sumarCuentas(datos, cuentasOriginales, cuentasSumar):
+
+    posicionRelativa = [c for z, c in zip(cuentasOriginales, range(len(cuentasOriginales))) if z in cuentasSumar]
+
+    resultado = np.sum(datos[posicionRelativa, :,:], axis = 0) 
+
+    return(resultado)
+
+
+def sumarBancos(datos, bancosSumar = ""):
+
+    if type(bancosSumar) == int:
+
+        return datos[:,bancosSumar,:]
+
+    elif bancosSumar == "":
+
+        resultado = np.sum(datos, axis = 1)
+
+    else:
+
+        resultado = np.sum(datos[:,bancosSumar,:], axis = 1)
+
+    return resultado
+
+    
+
+# graficar estas cosas 
+
+mesesFecha = list(map(lambda x : dt.date(int(x[2:]), int(x[0:2]), 1), meses))
+
+# se realiza la extracción para bancolombia
+
+def machete2019(x, mesesFecha):
+
+    aux = True 
+
+    for i in range(len(mesesFecha)):
+        if aux and mesesFecha[i].year == 2019:
+            primerIndex = i
+            aux = False 
+
+    
+    x[primerIndex] = (x[primerIndex - 1] + x[primerIndex + 1])/2
+
+    return x
+
+
+
+def graficaIngresos(nBanco, datos, cuentas, titulo, mesesFecha, nombreArchivo): 
+    
+
+    cuentasCartera = [
+        410202,
+        410204,
+        410206,
+        410210,
+        410212,
+        410214
+    ]
+
+    nombresCartera = {
+        0:"comerciales",
+        1:"consumo",
+        2:"tcComerciales",
+        3:"vivienda",
+        4:"micro",
+        5:"tcConsumo"
+    }
+
+    # se transforman las cuentas de cartera a posiciones
+
+    posicionesCartera = [i for i,z in zip(range(len(cuentas)), cuentas) if z in cuentasCartera]
+
+    cartera = datos[cuentas.index(410200), nBanco,:]
+
+    carteraIndividual = datos[posicionesCartera, nBanco, :]
+
+    porcentajesCartera = (carteraIndividual/cartera)*100
+
+    # se grafica esta vaina: 
+    # en este punto se revisan las divisiones por cero
+
+    porcentajesCartera[np.isinf(porcentajesCartera)] = 0
+
+    grafica = pd.DataFrame(np.transpose(porcentajesCartera))
+
+    mesesFecha = pd.to_datetime(mesesFecha)
+
+
+    grafica = grafica.set_index(mesesFecha).rename(nombresCartera, axis = 1)
+
+    for z in [z for z in nombresCartera.values()]:
+        plt.plot(
+            mesesFecha, 
+            machete2019([x for x in grafica.loc[:,z]], mesesFecha), 
+            label = z
+            )
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput("ingresos/" + nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+
+def graficaGastoTecnologia(): 
+
+    cuentasTecnologia = [ 
+        511530,
+        513325,
+        514505,
+        518020,
+        519030,
+        514510,
+        512000
+    ]
+
+    tecnologia = datos.copy()
+
+    tecnologia = sumarCuentas(datos, cuentas, cuentasTecnologia)
+
+    tecnologia = tecnologia[nBanco,:]
+
+    base = datos[cuentas.index(510000), nBanco,:] 
+
+
+def gastoTecnoBanco(nBanco, datos, titulo, mesesFecha, nombreArchivo):
+
+    "asdf"
+
+
+
+def activosComparativos(grupos, nombresGrupos, datos, titulo, mesesFecha, nombreArchivo, cuentas): 
+
+    totalIndustria = sumarBancos(datos)
+
+    totalIndustria = totalIndustria[cuentas.index(180124),:]/totalIndustria[cuentas.index(180100), :]
+
+    for grupo,nombre in zip(grupos, nombresGrupos):
+
+        actual = datos.copy()
+
+        actual = sumarBancos(actual, grupo)
+
+        actual = actual[cuentas.index(180124),:]/actual[cuentas.index(180100), :]
+
+        plt.plot(mesesFecha, [x for x in actual], label = nombre)
+
+
+    #plt.plot(mesesFecha, [x for x in totalIndustria], label = "Total Bancos")
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput(nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+clientesPragma = [c for c, i in zip(range(len(nombres.cliente)), nombres.cliente) if i == "si"]
+
+noClientes = [c for c, i in zip(range(len(nombres.cliente)), nombres.cliente) if i == "no"]
+
+activosComparativos([clientesPragma, noClientes], ["clientes", "no clientes"], datos, "Comparativo", mesesFecha, "asdf", cuentasExtraer)
+
+activosComparativos(
+    [0,3], 
+    ["BancoBogota", "Bancolombia"], 
+    datos, 
+    "Relativo a activos totales", 
+    mesesFecha, 
+    "relativoComparacion", 
+    cuentasExtraer
+    )
+
+
+
+
+def activosComparativosAbsoluto(grupos, nombresGrupos, datos, titulo, mesesFecha, nombreArchivo, cuentas): 
+
+    for grupo,nombre in zip(grupos, nombresGrupos):
+
+        actual = datos.copy()
+
+        actual = sumarBancos(actual, grupo)
+
+        actual = actual[cuentas.index(180124),:]
+
+        plt.plot(mesesFecha, [x for x in actual], label = nombre)
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput(nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+activosComparativosAbsoluto(
+    [0,3], 
+    ["BancoBogota", "Bancolombia"], 
+    datos, 
+    "Comparativo", 
+    mesesFecha, 
+    "absolutoComparacion", 
+    cuentasExtraer
+    )
+
+    
+
+
+nombresDeArchivos = [unidecode(i).replace(" ","") for i in nombres.banco]
+
+
+for nombre, numero, nArchivos in zip(nombres.banco, nombres.index, nombresDeArchivos):
+    graficaIngresos(numero, datos, cuentasExtraer, nombre, mesesFecha, nArchivos)
+
+
+
+
+
+def graficaIngresosComisiones(nBanco, datos, cuentas, titulo, mesesFecha, nombreArchivo): 
+    
+
+    cuentasCartera = [
+        411510,
+        411514,
+        411556,
+        411558
+    ]
+
+    nombresCartera = {
+        0:"Bancarios",
+        1:"Establecimientos TC",
+        2:"Tarjetas de Crédito",
+        3:"Tarjetas Débito",
+    }
+
+    # se transforman las cuentas de cartera a posiciones
+
+    posicionesCartera = [i for i,z in zip(range(len(cuentas)), cuentas) if z in cuentasCartera]
+
+    cartera = datos[cuentas.index(411500), nBanco,:]
+
+    carteraIndividual = datos[posicionesCartera, nBanco, :]
+
+    porcentajesCartera = (carteraIndividual/cartera)*100
+
+    porcentajesCartera[porcentajesCartera > 100] = 0
+
+    porcentajesCartera[porcentajesCartera < 0] = 0
+
+    # se grafica esta vaina: 
+    # en este punto se revisan las divisiones por cero
+
+    porcentajesCartera[np.isinf(porcentajesCartera)] = 0
+
+    grafica = pd.DataFrame(np.transpose(porcentajesCartera))
+
+    mesesFecha = pd.to_datetime(mesesFecha)
+
+
+    grafica = grafica.set_index(mesesFecha).rename(nombresCartera, axis = 1)
+
+    for z in [z for z in nombresCartera.values()]:
+        plt.plot(
+            mesesFecha, 
+            machete2019([x for x in grafica.loc[:,z]], mesesFecha), 
+            label = z
+            )
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput("ingresosComisiones/" + nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+
+
+
+nombresDeArchivos = [unidecode(i).replace(" ","") for i in nombres.banco]
+
+
+for nombre, numero, nArchivos in zip(nombres.banco, nombres.index, nombresDeArchivos):
+    graficaIngresosComisiones(numero, datos, cuentasExtraer, nombre, mesesFecha, nArchivos)
+
+
+
+# se crea una funcion para que se puedan sacar medias 
+
+def mediasBancos(unaMat):
+    # se toma la matriz y se saca la media a nivel de banco.
+    return np.nanmean(unaMat, axis = 0, )
+
+def moving_average(a, n=3) :
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
+ 
+
+def gastoEmpleados(
+    grupos, nombresGrupos, datos, titulo, mesesFecha, nombreArchivo, cuentas, media
+    ): 
+
+    # se saca la ubicación de las cuentas. 
+    # en teoria esto es robusto antes NA's 
+
+    gTotales = cuentas.index(510000)
+
+    gEmpleados = cuentas.index(512000)
+
+    gProvisiones = cuentas.index(517000)
+
+    gMercado1 = cuentas.index(512900)
+
+    gMercado2 = cuentas.index(510600)
+
+
+    for grupo,nombre in zip(grupos, nombresGrupos):
+
+        if type(grupo) == int:
+
+            totales = datos[gTotales, grupo,:] - datos[gProvisiones, grupo,:] - datos[gMercado1, grupo,:] - datos[gMercado2, grupo,:]
+
+            actual = datos[gEmpleados,grupo,:]/totales
+
+            actual[np.isnan(actual)] = 0
+
+            actual = actual*100
+
+        else:
+
+            totales = datos[gTotales, grupo,:] - datos[gProvisiones, grupo,:] - datos[gMercado1, grupo,:] - datos[gMercado2, grupo,:]
+
+            actual = mediasBancos(datos[gEmpleados,grupo,:]/totales)*100
+
+        
+        actual[actual < 0] = 0
+        actual[actual > 100] = 0
+
+        actual = moving_average(actual, media)
+
+        plt.plot(mesesFecha[(media - 1):], [x for x in actual], label = nombre)
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput(nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+clientesPragma = [c for c, i in zip(range(len(nombres.cliente)), nombres.cliente) if i == "si"]
+
+noClientes = [c for c, i in zip(range(len(nombres.cliente)), nombres.cliente) if i == "no"]
+
+gastoEmpleados(
+    [3, 10, clientesPragma, noClientes], 
+    ["Bancolombia", "scotia","clientes", "no clientes"], 
+    datos, 
+    "Gasto Empleados", 
+    mesesFecha, 
+    "Empleados", 
+    cuentasExtraer, 
+    12
+)
+
+def gastoProvisiones(
+    grupos, nombresGrupos, datos, titulo, mesesFecha, nombreArchivo, cuentas, media
+    ): 
+
+    # se saca la ubicación de las cuentas. 
+    # en teoria esto es robusto antes NA's 
+
+    gTotales = cuentas.index(510000)
+
+    gProvisiones = cuentas.index(517000)
+
+    gMercado1 = cuentas.index(512900)
+
+    gMercado2 = cuentas.index(510600)
+
+
+    for grupo,nombre in zip(grupos, nombresGrupos):
+
+        totales = datos[gTotales, grupo,:]  - datos[gMercado1, grupo,:] - datos[gMercado2, grupo,:]
+
+        if type(grupo) == int:
+
+            actual = datos[gProvisiones,grupo,:]/totales
+
+            actual[np.isnan(actual)] = 0
+
+            actual = actual*100
+
+        else:
+
+
+            actual = mediasBancos(datos[gProvisiones,grupo,:]/totales)*100
+
+        
+        actual[actual < 0] = 0
+        actual[actual > 100] = 0
+
+        actual = moving_average(actual, media)
+
+        plt.plot(mesesFecha[(media - 1):], [x for x in actual], label = nombre)
+
+    plt.legend()
+    plt.title(titulo)
+    plt.savefig(exOutput(nombreArchivo + ".png"))
+    plt.clf()
+    plt.cla()
+
+
+gastoProvisiones(
+    [3, 10, clientesPragma, noClientes], 
+    ["Bancolombia", "scotia","clientes", "no clientes"], 
+    datos, 
+    "Deterioro", 
+    mesesFecha, 
+    "deterioro", 
+    cuentasExtraer, 
+    12
+)

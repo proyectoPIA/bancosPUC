@@ -1,0 +1,123 @@
+# web scrapping de la página de la SFC con lo que se
+# extraen los datos históricos
+
+# se cargan los paquetes
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+from time import sleep 
+import zipfile
+import os
+
+
+# se crea una funcion para convertir todos los paths en paths repecto a la
+# ubicación del repositorio. Esto no es correcto pero no hay de otra.
+
+basePath = "/Volumes/GoogleDrive/Mi unidad/proyectosPragma/bancosPUC/"
+
+#expand directory
+def exDir(x):
+    resultado = basePath + x + "/"
+    return resultado
+
+
+# link de la SFC donde están los archivos:
+
+link = "https://www.superfinanciera.gov.co/inicio/informes-y-cifras/cifras/establecimientos-de-credito/informacion-por-sector/bancos/informacion-financiera-con-fines-de-supervision-bancos-niif-10084375"
+
+# se realiza el scrapping de direcciones
+
+
+# funcion para realizar scrapping de las direcciones
+
+def sfc_scrape(url):
+    # get the html from the url
+    r = requests.get(url)
+    # parse the html
+    soup = BeautifulSoup(r.text, 'html.parser')
+    # find the div with the class 'pub' 
+    clase = soup.find_all("div", {"class":"pub"})[0]
+    # find all the hrefs
+    result = [i["href"] for i in clase.find_all("a")]
+
+    # filter the results if they start whith '/'
+    result = [i for i in result if i.startswith("/")]
+    # add the base url to the results
+    base_url = "https://www.superfinanciera.gov.co"
+    result = [base_url + i for i in result] 
+    # return the list of hrefs 
+    return result
+
+# se sacan los links
+
+sfc = sfc_scrape(link)
+
+# se crea funcion para extaer los nombres de los archivos
+
+def extract_file(result): 
+    # create an empty list
+    file_names = []
+    for i in result:
+        if "downloadname" in i:
+            file_names.append(i.split("=")[3])
+
+        else:
+            file_names.append(i.split("institucional/")[1].split("/")[1])
+    
+    return file_names
+
+
+# se crea funcion para descargar zips
+
+def download_zip(result, location):
+
+    # se realiza un filtro a cuales zips aun no se encuentran en la carpeta
+    # se supone que en esta carpeta solo están los archivos necesarios.
+
+    archivosActuales = os.listdir(exDir(location))
+
+
+    nombres = extract_file(result)
+
+    # estas posiciones son las que se tienen que descargar
+
+    filtro = [i for i in range(len(nombres)) if nombres[i] not in archivosActuales]
+
+    result = [result[i] for i in filtro]
+
+    nombres = [nombres[i] for i in filtro]
+
+    baseLocation = exDir(location)
+
+
+    for i,z in zip(result,nombres):
+        r = requests.get(i)
+        with open(baseLocation + z, 'wb') as f:
+            f.write(r.content)
+        sleep(0.1)
+
+
+
+
+download_zip(sfc,"datos/raw/")
+
+
+# en este punto se tienen que extraer las cosas
+
+def unzip(location, destination, names):
+
+    # se expanden las direcciones
+
+    baseLocation = exDir(location)
+    destination = exDir(destination)
+       
+    for i in names:
+        with zipfile.ZipFile(baseLocation + i, 'r') as zip_ref:
+            zip_ref.extractall(destination)
+
+
+# se descomprimen -- Esto se puede mejorar con revisar cuales ya estan y que
+# esos no se descompriman 
+
+unzip("datos/raw/", "datos/exceles/", extract_file(sfc))
