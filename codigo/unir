@@ -506,32 +506,7 @@ def graficaIngresos(nBanco, datos, cuentas, titulo, mesesFecha, nombreArchivo):
     plt.cla()
 
 
-def graficaGastoTecnologia(): 
-
-    cuentasTecnologia = [ 
-        511530,
-        513325,
-        514505,
-        518020,
-        519030,
-        514510,
-        512000
-    ]
-
-    tecnologia = datos.copy()
-
-    tecnologia = sumarCuentas(datos, cuentas, cuentasTecnologia)
-
-    tecnologia = tecnologia[nBanco,:]
-
-    base = datos[cuentas.index(510000), nBanco,:] 
-
-
-def gastoTecnoBanco(nBanco, datos, titulo, mesesFecha, nombreArchivo):
-
-    "asdf"
-
-
+# comparativo de activos (entre varios grupos)
 
 def activosComparativos(grupos, nombresGrupos, datos, titulo, mesesFecha, nombreArchivo, cuentas): 
 
